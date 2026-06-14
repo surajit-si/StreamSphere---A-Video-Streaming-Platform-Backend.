@@ -4,6 +4,7 @@ import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponce } from "../utils/ApiResponce.js";
 import jwt from "jsonwebtoken";
+import mongoose, { mongo } from "mongoose";
 
 const generateAccessAndRefreshTokens = async (user_id) => {
   try {
@@ -98,7 +99,9 @@ const loginUser = asyncHandler(async (req, res) => {
   //response
 
   //Destructure
-  const { username, email, password } = req.body;
+  let { username, email, password } = req.body;
+  username = username?.toLowerCase();
+  email = email?.toLowerCase();
 
   //check if fields are avilable.
   if (!(username || email)) {
@@ -246,7 +249,9 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
 
   await user.save({ validateBeforeSave: false });
 
-  return res.status(new ApiResponce(200, {}, "password changed successfully"));
+  return res
+    .status(200)
+    .json(new ApiResponce(200, {}, "password changed successfully"));
 });
 
 const getCurrentUser = asyncHandler(async (req, res) => {
@@ -258,10 +263,10 @@ const getCurrentUser = asyncHandler(async (req, res) => {
 const updateAccountDetails = asyncHandler(async (req, res) => {
   const { fullName, email } = req.body;
   if (!fullName || !email) {
-    throw new ApiError(200, "email and fullName is requided");
+    throw new ApiError(400, "email and fullName is requided");
   }
 
-  await User.findByIdAndUpdate(
+  const user = await User.findByIdAndUpdate(
     req.user?._id,
     {
       $set: {
@@ -294,7 +299,7 @@ const updateAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(500, "avatar cloud upload failed");
   }
 
-  const updatedUser = User.findByIdAndUpdate(
+  const updatedUser = await User.findByIdAndUpdate(
     user?._id,
     {
       $set: {
@@ -321,12 +326,12 @@ const updateCover = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Cover file not found");
   }
 
-  const coverURL = await uploadOnCloudinary(avatarLocalPath);
+  const coverURL = await uploadOnCloudinary(coverLocalPath);
   if (!coverURL) {
     throw new ApiError(500, "cover cloud upload failed");
   }
 
-  const updatedUser = User.findByIdAndUpdate(
+  const updatedUser = await User.findByIdAndUpdate(
     user?._id,
     {
       $set: {
@@ -408,6 +413,61 @@ const getUserChannelProfile = asyncHandler(async (req, res) => {
   return res.status(200).json(new ApiResponce(200, channel[0], "successful"));
 });
 
+const getUserWatchHistory = asyncHandler(async (req, res) => {
+  const user = await User.aggregate([
+    {
+      $match: {
+        _id: new mongoose.Types.ObjectId(req.user._id),
+      },
+    },
+    {
+      $lookup: {
+        from: "Video",
+        localField: "watchHistory",
+        foreignField: "_id",
+        as: "watchHistory",
+        pipeline: [
+          {
+            $lookup: {
+              from: "User",
+              localField: "owner",
+              foreignField: "_id",
+              as: "owner",
+              //If we create the project state without creating the pipeline, it will not work because the user is still inside the video correction, not in the user. So for inside the user, we need to create a pipeline.
+              pipeline: [
+                {
+                  $project: {
+                    fullName: 1,
+                    username: 1,
+                    avatar: 1,
+                  },
+                },
+              ],
+            },
+          },
+          {
+            //for only making Not to send array
+            $addFields: {
+              owner: {
+                $first: "$owner",
+              },
+            },
+          },
+        ],
+      },
+    },
+  ]);
+  return res
+    .status(200)
+    .json(
+      new ApiResponce(
+        200,
+        user[0].watchHistory,
+        "watchHistory fetched successfully",
+      ),
+    );
+});
+
 export {
   registerUser,
   loginUser,
@@ -419,4 +479,5 @@ export {
   updateAvatar,
   updateCover,
   getUserChannelProfile,
+  getUserWatchHistory,
 };
